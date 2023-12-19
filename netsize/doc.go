@@ -1,3 +1,0 @@
-// kad-dht
-
-package netsize
