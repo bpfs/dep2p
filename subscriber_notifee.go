@@ -5,6 +5,7 @@ package dep2p
 import (
 	"fmt"
 
+	"github.com/bpfs/dep2p/utils"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -78,11 +79,11 @@ func (dht *DeP2PDHT) startNetworkSubscriber() error {
 						handleLocalReachabilityChangedEvent(dht, evt)
 					} else {
 						// 如果我们收到一个我们没有订阅的事件，那就真的出了问题
-						logrus.Errorf("received LocalReachabilityChanged event that was not subscribed to")
+						logrus.Errorf("[%s]收到未订阅的本地可达性更改事件", utils.WhereAmI())
 					}
 				default:
 					// 如果我们收到另一种类型的事件，那就真的出了问题
-					logrus.Errorf("got wrong type from subscription: %T", e)
+					logrus.Errorf("[%s]订阅类型错误: %T", utils.WhereAmI(), e)
 				}
 			case <-dht.ctx.Done():
 				return
@@ -113,7 +114,7 @@ func handlePeerChangeEvent(dht *DeP2PDHT, p peer.ID) {
 	valid, err := dht.validRTPeer(p)
 	if err != nil {
 		// 如果无法检查 peerstore 的协议支持情况，则记录错误日志并返回
-		logrus.Errorf("could not check peerstore for protocol support: err: %s", err)
+		logrus.Errorf("[%s]无法检查对等存储的协议支持: %v", utils.WhereAmI(), err)
 		return
 	} else if valid {
 		// 如果对等方有效，则调用 peerFound 方法处理对等方的发现
@@ -147,13 +148,13 @@ func handleLocalReachabilityChangedEvent(dht *DeP2PDHT, e event.EvtLocalReachabi
 		target = modeServer
 	}
 
-	logrus.Infof("processed event %T; performing dht mode switch", e)
+	logrus.Infof("已处理事件%T; 执行 dht 模式切换", e)
 
 	err := dht.setMode(target)
 	// 注意：模式将以十进制打印出来
 	if err == nil {
-		logrus.Infoln("switched DHT mode successfully", "mode", target)
+		logrus.Infof("切换DHT模式成功, 模式[%v]", target)
 	} else {
-		logrus.Errorln("switching DHT mode failed", "mode", target, "error", err)
+		logrus.Errorf("[%s]切换DHT模式失败, 模式[%v]: %v", utils.WhereAmI(), target, err)
 	}
 }

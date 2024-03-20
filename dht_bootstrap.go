@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/bpfs/dep2p/utils"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/sirupsen/logrus"
 
@@ -45,7 +46,7 @@ func GetDefaultBootstrapPeerAddrInfos() []peer.AddrInfo {
 	for i := range DefaultBootstrapPeers {
 		info, err := peer.AddrInfoFromP2pAddr(DefaultBootstrapPeers[i])
 		if err != nil {
-			logrus.Error("无法将引导程序地址转换为对等地址信息、地址", DefaultBootstrapPeers[i].String(), err, "err")
+			logrus.Errorf("[%s]无法将引导程序 %s 转换为对等地址信息: %v", utils.WhereAmI(), DefaultBootstrapPeers[i].String(), err)
 			continue
 		}
 		ds = append(ds, *info)

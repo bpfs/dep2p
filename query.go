@@ -11,6 +11,7 @@ import (
 
 	"github.com/bpfs/dep2p/internal"
 	"github.com/bpfs/dep2p/qpeerset"
+	"github.com/bpfs/dep2p/utils"
 
 	kb "github.com/bpfs/dep2p/kbucket"
 
@@ -87,6 +88,7 @@ func (dht *DeP2PDHT) runLookupWithFollowup(ctx context.Context, target string, q
 	// 执行查询
 	lookupRes, qps, err := dht.runQuery(ctx, target, queryFn, stopFn)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -573,7 +575,7 @@ func (q *query) queryPeer(ctx context.Context, ch chan<- *queryUpdate, p peer.ID
 	saw := []peer.ID{}
 	for _, next := range newPeers {
 		if next.ID == q.dht.self { // 不要添加自身节点
-			logrus.Debugf("PEERS CLOSER -- worker for: %v found self", p)
+			logrus.Debugf("[%s]同行更接近 -- %v 的工作人员找到了自己", utils.WhereAmI(), p)
 			continue
 		}
 
@@ -606,7 +608,7 @@ func (dht *DeP2PDHT) dialPeer(ctx context.Context, p peer.ID) error {
 		return nil
 	}
 
-	logrus.Debugf("not connected. dialing.")
+	logrus.Debugln("未连接->拨号...")
 	routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 		Type: routing.DialingPeer,
 		ID:   p,
@@ -614,7 +616,7 @@ func (dht *DeP2PDHT) dialPeer(ctx context.Context, p peer.ID) error {
 
 	pi := peer.AddrInfo{ID: p}
 	if err := dht.host.Connect(ctx, pi); err != nil {
-		logrus.Debugf("error connecting: %s", err)
+		logrus.Debugf("[%s]连接错误: %v", utils.WhereAmI(), err)
 		routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 			Type:  routing.QueryError,
 			Extra: err.Error(),
@@ -623,6 +625,6 @@ func (dht *DeP2PDHT) dialPeer(ctx context.Context, p peer.ID) error {
 
 		return err
 	}
-	logrus.Debugln("connected. dial success.")
+	logrus.Debugln("已连接—>拨号成功!")
 	return nil
 }

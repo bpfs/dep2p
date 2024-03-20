@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	pb "github.com/bpfs/dep2p/pb"
+	"github.com/bpfs/dep2p/utils"
 
 	pstore "github.com/libp2p/go-libp2p/p2p/host/peerstore"
 	"github.com/sirupsen/logrus"
@@ -64,7 +65,7 @@ func (dht *DeP2PDHT) handlerForMsgType(t pb.Message_MessageType) dhtHandler {
 // handlePing 函数用于处理 ping 请求
 func (dht *DeP2PDHT) handlePing(_ context.Context, p peer.ID, pmes *pb.Message) (*pb.Message, error) {
 	// 打印日志，回应来自对等方的 ping 消息
-	logrus.Debugf("%s Responding to ping from %s!\n", dht.self, p)
+	logrus.Debugf("[%s]%s 正在响应来自 %s 的 ping!", utils.WhereAmI(), dht.self, p)
 	return pmes, nil
 }
 

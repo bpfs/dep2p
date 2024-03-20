@@ -11,6 +11,7 @@ import (
 
 	"github.com/bpfs/dep2p/internal"
 	"github.com/bpfs/dep2p/qpeerset"
+	"github.com/bpfs/dep2p/utils"
 
 	kb "github.com/bpfs/dep2p/kbucket"
 
@@ -40,6 +41,7 @@ func (d *RoutingDiscovery) Advertise(ctx context.Context, ns string, opts ...dis
 	var options discovery.Options
 	err := options.Apply(opts...)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return 0, err
 	}
 
@@ -51,6 +53,7 @@ func (d *RoutingDiscovery) Advertise(ctx context.Context, ns string, opts ...dis
 
 	cid, err := nsToCid(ns)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return 0, err
 	}
 
@@ -61,6 +64,7 @@ func (d *RoutingDiscovery) Advertise(ctx context.Context, ns string, opts ...dis
 
 	err = d.Provide(pctx, cid, true)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return 0, err
 	}
 
@@ -71,6 +75,7 @@ func (d *RoutingDiscovery) FindPeers(ctx context.Context, ns string, opts ...dis
 	var options discovery.Options
 	err := options.Apply(opts...)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -81,6 +86,7 @@ func (d *RoutingDiscovery) FindPeers(ctx context.Context, ns string, opts ...dis
 
 	cid, err := nsToCid(ns)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -90,6 +96,7 @@ func (d *RoutingDiscovery) FindPeers(ctx context.Context, ns string, opts ...dis
 func nsToCid(ns string) (cid.Cid, error) {
 	h, err := multihash.Sum([]byte(ns), multihash.SHA2_256, -1)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return cid.Undef, err
 	}
 
@@ -247,6 +254,7 @@ func (dht *DeP2PDHT) classicProvide(ctx context.Context, keyMH multihash.Multiha
 		exceededDeadline = true
 	case nil:
 	default:
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return err
 	}
 
@@ -262,6 +270,7 @@ func (dht *DeP2PDHT) classicProvide(ctx context.Context, keyMH multihash.Multiha
 			// 使用协议传递器向对等节点发送提供者记录。
 			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
 			if err != nil {
+				logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 				// 如果发生错误，打印错误日志。
 				logrus.Debug(err)
 			}
@@ -310,6 +319,7 @@ func (dht *DeP2PDHT) findProvidersAsyncRoutine(ctx context.Context, key multihas
 	// 从提供者存储中获取提供者信息
 	provs, err := dht.providerStore.GetProviders(ctx, key)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return
 	}
 	for _, p := range provs {
@@ -344,6 +354,7 @@ func (dht *DeP2PDHT) findProvidersAsyncRoutine(ctx context.Context, key multihas
 
 			provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
 			if err != nil {
+				logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 				return nil, err
 			}
 

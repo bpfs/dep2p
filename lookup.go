@@ -9,6 +9,7 @@ import (
 
 	"github.com/bpfs/dep2p/internal"
 	"github.com/bpfs/dep2p/metrics"
+	"github.com/bpfs/dep2p/utils"
 
 	"github.com/bpfs/dep2p/qpeerset"
 
@@ -37,6 +38,7 @@ func (dht *DeP2PDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID
 	lookupRes, err := dht.runLookupWithFollowup(ctx, key, dht.pmGetClosestPeers(key), func(*qpeerset.QueryPeerset) bool { return false })
 
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -46,7 +48,7 @@ func (dht *DeP2PDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID
 
 	// 用于网络大小估算的查找结果跟踪
 	if err = dht.nsEstimator.Track(key, lookupRes.closest); err != nil {
-		logrus.Debugf("网络规模估算器跟踪对等点: %s", err)
+		logrus.Debugf("[%s]网络规模估算器跟踪对等点: %v", utils.WhereAmI(), err)
 	}
 
 	// 网络大小估算器。
@@ -86,7 +88,7 @@ func (dht *DeP2PDHT) pmGetClosestPeers(key string) queryFn {
 		// 注意：如果peer碰巧知道另一个peerID与给定id完全匹配的peer，它将返回该peer，即使该peer不是DHT服务器节点。
 		peers, err := dht.protoMessenger.GetClosestPeers(ctx, p, peer.ID(key), valByte)
 		if err != nil {
-			logrus.Debugf("错误地临近节点: %s", err)
+			logrus.Debugf("[%s]错误地临近节点: %v", utils.WhereAmI(), err)
 			routing.PublishQueryEvent(ctx, &routing.QueryEvent{
 				Type:  routing.QueryError,
 				ID:    p,

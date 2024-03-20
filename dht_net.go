@@ -8,6 +8,7 @@ import (
 
 	"github.com/bpfs/dep2p/internal/net"
 	"github.com/bpfs/dep2p/metrics"
+	"github.com/bpfs/dep2p/utils"
 
 	pb "github.com/bpfs/dep2p/pb"
 
@@ -43,7 +44,7 @@ func (dht *DeP2PDHT) handleNewMessage(s network.Stream) bool {
 
 	for {
 		if dht.getMode() != modeServer {
-			logrus.Debugln("ignoring incoming dht message while not in server mode")
+			logrus.Debugf("[%s]不在服务器模式下忽略传入的 dht 消息", utils.WhereAmI())
 			return false
 		}
 
@@ -107,8 +108,7 @@ func (dht *DeP2PDHT) handleNewMessage(s network.Stream) bool {
 		}
 
 		// 发送响应消息
-		err = net.WriteMsg(s, resp)
-		if err != nil {
+		if err = net.WriteMsg(s, resp); err != nil {
 			stats.Record(ctx, metrics.ReceivedMessageErrors.M(1))
 			return false
 		}

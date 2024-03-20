@@ -52,6 +52,7 @@ func NewDeP2P(ctx context.Context, opts ...OptionDeP2P) (*DeP2P, error) {
 	// 调用每个选项函数，并配置 DeP2PHost
 	for _, opt := range opts {
 		if err := opt(deP2P); err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			return nil, err
 		}
 	}
@@ -59,6 +60,7 @@ func NewDeP2P(ctx context.Context, opts ...OptionDeP2P) (*DeP2P, error) {
 	// 使用配置后的 DeP2PHost 创建 libp2p 节点
 	h, err := libp2p.New(deP2P.options.Libp2pOpts...)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -74,7 +76,7 @@ func NewDeP2P(ctx context.Context, opts ...OptionDeP2P) (*DeP2P, error) {
 	// 如果路由表有超过“minRTRefreshThreshold”对等点，我们仅当我们成功从它获得查询响应或向我们发送查询时才将对等点视为路由表候选者。
 	dhtDeP2P, err := New(ctx, h, deP2P.options.DhtOpts...)
 	if err != nil {
-		logrus.Errorf("DHT失败: %v", err)
+		logrus.Errorf("[%s]DHT失败: %v", utils.WhereAmI(), err)
 		return nil, err
 
 	}
@@ -82,7 +84,7 @@ func NewDeP2P(ctx context.Context, opts ...OptionDeP2P) (*DeP2P, error) {
 	logrus.Info("引导DHT")
 	// Bootstrap 告诉 DHT 进入满足 DeP2PRouter 接口的引导状态。
 	if err := dhtDeP2P.Bootstrap(ctx); err != nil {
-		logrus.Errorf("引导DHT失败: %v", err)
+		logrus.Errorf("[%s]引导DHT失败: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -91,6 +93,7 @@ func NewDeP2P(ctx context.Context, opts ...OptionDeP2P) (*DeP2P, error) {
 	// 解析引导节点地址
 	peerAddrInfos, err := utils.ParseAddrInfo(deP2P.options.AddsBook)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -103,6 +106,7 @@ func NewDeP2P(ctx context.Context, opts ...OptionDeP2P) (*DeP2P, error) {
 	deP2P.connSupervisor.startSupervising(readySignalC)
 	// 主机启动发现节点
 	if err := deP2P.networkDiscoveryNode(); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 	// 连接握手协议
@@ -170,8 +174,27 @@ func NewDeP2P(ctx context.Context, opts ...OptionDeP2P) (*DeP2P, error) {
 //		return nil
 //	}
 func (bp *DeP2P) handshakeHandle(req *streams.RequestMessage, res *streams.ResponseMessage) (int32, string) {
-	res.Code = 200 // 假设默认响应码为成功
-	res.Msg = "成功" // 默认响应消息为"成功"
+	// 检查请求消息是否为空
+	if req == nil || req.Message == nil {
+		logrus.Errorf("[%s]:请求消息为空", utils.WhereAmI())
+		return 400, "请求消息为空"
+	}
+
+	// 检查DHT实例是否已初始化
+	if bp.DHT() == nil {
+		logrus.Errorf("[%s]:DHT未初始化", utils.WhereAmI())
+		return 500, "DHT未初始化"
+	}
+
+	// 检查节点信息是否已初始化
+	if bp.nodeInfo == nil {
+		logrus.Errorf("[%s]:节点信息未初始化", utils.WhereAmI())
+		return 500, "节点信息未初始化"
+	}
+
+	// 假设默认响应码为成功
+	res.Code = 200
+	res.Msg = "成功"
 
 	// 构建握手响应
 	handshakeres := &Handshake{
@@ -181,26 +204,41 @@ func (bp *DeP2P) handshakeHandle(req *streams.RequestMessage, res *streams.Respo
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 	if err := enc.Encode(handshakeres); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		// 编码失败，返回错误响应码和消息
 		return 500, "握手响应编码失败"
 	}
 
 	// 设置响应数据
 	res.Data = buf.Bytes()
+
+	// 检查Host实例是否已初始化
+	if bp.Host() == nil {
+		logrus.Errorf("[%s]:Host未初始化", utils.WhereAmI())
+		return 500, "Host未初始化"
+	}
 	res.Message.Sender = bp.Host().ID().String() // 设置发送方ID
 
 	handshake := new(Handshake)
 	slicePayloadBuffer := bytes.NewBuffer(req.Payload)
 	gobDecoder := gob.NewDecoder(slicePayloadBuffer)
 	if err := gobDecoder.Decode(handshake); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		// 请求解码失败
 		return 400, "握手请求解码失败"
+	}
+
+	// 检查connSupervisor是否已初始化
+	if bp.connSupervisor == nil || bp.connSupervisor.routingTables == nil {
+		logrus.Errorf("[%s]:连接监督器未初始化", utils.WhereAmI())
+		return 500, "连接监督器未初始化"
 	}
 
 	// 处理握手逻辑
 	table, exists := bp.connSupervisor.routingTables[handshake.ModeId]
 	pidDecode, err := peer.Decode(req.Message.Sender)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		// Peer ID解码失败
 		return 400, "Peer ID解码失败"
 	}
@@ -212,6 +250,7 @@ func (bp *DeP2P) handshakeHandle(req *streams.RequestMessage, res *streams.Respo
 		// 新建Kbucket路由表
 		table, err := NewTable(bp.connSupervisor.host)
 		if err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			// 新建路由表失败
 			return 500, "新建路由表失败"
 		}
@@ -264,7 +303,7 @@ func (bp *DeP2P) RoutingTable(mode int) *kbucket.RoutingTable {
 		// 键不存在
 		table, err := NewTable(bp.host)
 		if err != nil {
-			logrus.Error("新建k桶失败", err)
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		}
 		bp.connSupervisor.routingTables[mode] = table
 		return table

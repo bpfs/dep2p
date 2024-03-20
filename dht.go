@@ -16,6 +16,7 @@ import (
 	"github.com/bpfs/dep2p/metrics"
 	"github.com/bpfs/dep2p/netsize"
 	"github.com/bpfs/dep2p/providers"
+	"github.com/bpfs/dep2p/utils"
 
 	"github.com/bpfs/dep2p/rtrefresh"
 
@@ -178,23 +179,27 @@ func New(ctx context.Context, h host.Host, options ...Option) (*DeP2PDHT, error)
 	var cfg dhtcfg.Config
 	// Apply 将给定选项应用于此选项
 	if err := cfg.Apply(append([]Option{dhtcfg.Defaults}, options...)...); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
 	// ApplyFallbacks 设置在配置创建期间无法应用的默认值，因为它们依赖于其他配置参数（例如 optA 默认为 2x optB）和/或主机
 	if err := cfg.ApplyFallbacks(h); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
 	// Validate 方法用于验证配置项是否符合要求
 	if err := cfg.Validate(); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
 	// makeDHT 使用给定的主机和配置创建一个新的 DeP2PDHT 对象。
 	dht, err := makeDHT(h, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create DHT, err=%s", err)
+		logrus.Errorf("[%s]创建DHT失败: %v", utils.WhereAmI(), err)
+		return nil, fmt.Errorf("创建DHT失败")
 	}
 
 	dht.autoRefresh = cfg.RoutingTable.AutoRefresh // 设置自动刷新路由表的选项
@@ -551,7 +556,7 @@ func (dht *DeP2PDHT) peerFound(p peer.ID) {
 	// 验证远程对等点是否通告正确的 dht 协议
 	b, err := dht.validRTPeer(p)
 	if err != nil {
-		logrus.Errorln("failed to validate if peer is a DHT peer", "peer", p, "error", err)
+		logrus.Errorf("[%s]无法验证 %s 是否是 DHT 对等点: %v", utils.WhereAmI(), p.String(), err)
 	} else if b {
 
 		// 检查是否达到最大并发查找检查数
@@ -578,7 +583,7 @@ func (dht *DeP2PDHT) peerFound(p peer.ID) {
 			dht.lookupChecksLk.Unlock()
 
 			if err != nil {
-				logrus.Debug("connected peer not answering DHT request as expected", "peer", p, "error", err)
+				logrus.Debugf("[%s]连接的对等点未按预期应答 DHT 请求: %v", utils.WhereAmI(), err)
 				return
 			}
 
@@ -631,7 +636,8 @@ func makeRoutingTable(dht *DeP2PDHT, cfg dhtcfg.Config, maxLastSuccessfulOutboun
 		})
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to construct peer diversity filter: %w", err)
+			logrus.Errorf("[%s]未能构建对等分集过滤器: %v", utils.WhereAmI(), err)
+			return nil, fmt.Errorf("未能构建对等分集过滤器")
 		}
 
 		filter = df
@@ -640,6 +646,7 @@ func makeRoutingTable(dht *DeP2PDHT, cfg dhtcfg.Config, maxLastSuccessfulOutboun
 	// NewRoutingTable 使用给定的存储桶大小、本地 ID 和延迟容忍度创建新的路由表。
 	rt, err := kb.NewRoutingTable(cfg.BucketSize, dht.selfKey, time.Minute, dht.host.Peerstore(), maxLastSuccessfulOutboundThreshold, filter)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -729,6 +736,7 @@ func (dht *DeP2PDHT) lookupCheck(ctx context.Context, p peer.ID) error {
 	val.Mode = int32(dht.mode)  // 当前运行模式
 	valByte, err := val.Marshal()
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return err
 	}
 	//////////////////////////////////////////////////////////////////////
@@ -737,7 +745,7 @@ func (dht *DeP2PDHT) lookupCheck(ctx context.Context, p peer.ID) error {
 	peerids, err := dht.protoMessenger.GetClosestPeers(ctx, p, p, valByte)
 	// p 应该至少返回它自己的peerid
 	if err == nil && len(peerids) == 0 {
-		return fmt.Errorf("peer %s failed to return its closest peers, got %d", p, len(peerids))
+		logrus.Errorf("[%s]对等点 %s 未能返回其最接近的对等点，得到 %d: %v", utils.WhereAmI(), p, len(peerids), err)
 	}
 	return err
 }
@@ -781,7 +789,7 @@ func (dht *DeP2PDHT) fixLowPeers() {
 			if err == nil {
 				found++
 			} else {
-				logrus.Warnln("引导失败", "对等节点", ai.ID, "错误", err)
+				logrus.Errorf("[%s] %s 引导失败: %v", utils.WhereAmI(), ai.ID.String(), err)
 			}
 
 			// 等待两个引导节点，或者尝试所有引导节点。
@@ -822,7 +830,7 @@ func (dht *DeP2PDHT) betterPeersToQuery(pmes *pb.Message, from peer.ID, count in
 
 	// 如果没有可用的节点，则返回 nil
 	if closer == nil {
-		logrus.Infoln("no closer peers to send", from)
+		logrus.Infoln("没有更近的同行可以发送", from)
 		return nil
 	}
 
@@ -831,7 +839,7 @@ func (dht *DeP2PDHT) betterPeersToQuery(pmes *pb.Message, from peer.ID, count in
 
 		// 如果对等节点与当前节点相同，则出现错误，不应该返回自身
 		if clp == dht.self {
-			logrus.Errorln("BUG betterPeersToQuery: attempted to return self! this shouldn't happen...")
+			logrus.Errorf("[%s]尝试返回自身！ 这不应该发生...", utils.WhereAmI())
 			return nil
 		}
 		// 不要将对等节点返回给自己
@@ -855,7 +863,7 @@ func (dht *DeP2PDHT) nearestPeersToQuery(pmes *pb.Message, count int) []peer.ID 
 
 // peerStoppedDHT 向路由表发出信号，表明对等方无法再响应 DHT 查询。
 func (dht *DeP2PDHT) peerStoppedDHT(p peer.ID) {
-	logrus.Debug("peer stopped dht", "peer", p)
+	logrus.Debugf("[%s]%s 对等点停止了 dht", utils.WhereAmI(), p.String())
 	// 不支持 DHT 协议的对等点对我们来说是死的。
 	// 在它再次开始支持 DHT 协议之前，再进行对话是没有意义的。
 	dht.routingTable.RemovePeer(p)
@@ -880,7 +888,7 @@ func (dht *DeP2PDHT) setMode(m mode) error {
 		return dht.moveToClientMode()
 	default:
 		// 无法识别的 DHT 模式，返回错误
-		return fmt.Errorf("unrecognized dht mode: %d", m)
+		return fmt.Errorf("无法识别的 dht 模式: %d", m)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/bpfs/dep2p/kbucket"
 	"github.com/bpfs/dep2p/streams"
+	"github.com/bpfs/dep2p/utils"
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -34,6 +35,7 @@ const (
 func (bp *DeP2P) networkDiscoveryNode() error {
 	// 连接至引导节点
 	if err := connectToBootstrapPeers(bp.Context(), bp.Host(), bp.options.BootstrapsPeers); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return err
 	}
 
@@ -51,7 +53,7 @@ func (bp *DeP2P) networkDiscoveryNode() error {
 		for {
 			peerChan, err := routingDiscovery.FindPeers(bp.ctx, bp.options.RendezvousString)
 			if err != nil {
-				logrus.Errorf("寻找其他节点失败: %v", err)
+				logrus.Errorf("[%s]寻找其他节点失败: %v", utils.WhereAmI(), err)
 				continue
 			}
 
@@ -70,6 +72,7 @@ func connectToBootstrapPeers(ctx context.Context, host host.Host, bootstrapPeers
 	for _, peer := range bootstrapPeers {
 		maddr, err := multiaddr.NewMultiaddr(peer)
 		if err == nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			defaultMultiaddrs = append(defaultMultiaddrs, maddr)
 		}
 	}
@@ -85,7 +88,7 @@ func connectToBootstrapPeers(ctx context.Context, host host.Host, bootstrapPeers
 		// 将 Multiaddr 转换为 AddrInfo
 		peerInfo, err := peer.AddrInfoFromP2pAddr(peerAddr)
 		if err != nil {
-			logrus.Errorf("地址 %s 转换失败: %v", peerAddr.String(), err)
+			logrus.Errorf("[%s]地址 %s 转换失败: %v", utils.WhereAmI(), peerAddr.String(), err)
 			continue
 		}
 
@@ -93,7 +96,7 @@ func connectToBootstrapPeers(ctx context.Context, host host.Host, bootstrapPeers
 		go func(peerInfo peer.AddrInfo) {
 			defer wg.Done()
 			if err := host.Connect(ctx, peerInfo); err != nil {
-				logrus.Debugf("连接引导节点警告: %s", err.Error())
+				logrus.Debugf("[%s]连接引导节点警告: %v", utils.WhereAmI(), err)
 			} else {
 				logrus.Printf("连接引导节点成功: %s", peerInfo.ID)
 				successfulConnection = true
@@ -104,7 +107,7 @@ func connectToBootstrapPeers(ctx context.Context, host host.Host, bootstrapPeers
 	wg.Wait() // 阻塞，确保所有的协程全部返回
 
 	if !successfulConnection {
-		logrus.Errorf("未能连接至引导节点")
+		logrus.Errorf("[%s]未能连接至引导节点", utils.WhereAmI())
 		return fmt.Errorf("未能连接至引导节点")
 	}
 
@@ -129,6 +132,8 @@ func (cs *ConnSupervisor) handleChanNewPeerFound(peerChan <-chan peer.AddrInfo) 
 			handshake, err := handshakeAgreement(cs.ctx, cs.host, cs.nodeInfo, p.ID, HandshakeProtocol, int(cs.peerDHT.Mode()))
 
 			if err != nil {
+				logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+
 				// 如果错误继续下一个同行
 				// TODO:后面补充节点信息
 				cs.AddConn(p, false, -1, nil) // 将新的连接添加到连接管理器中
@@ -146,7 +151,7 @@ func (cs *ConnSupervisor) handleChanNewPeerFound(peerChan <-chan peer.AddrInfo) 
 				// 键不存在
 				table, err := NewTable(cs.host)
 				if err != nil {
-					logrus.Error("新建k桶失败", err)
+					logrus.Errorf("[%s]新建k桶失败: %v", utils.WhereAmI(), err)
 				}
 				// 更新Kbucket路由表
 				renewKbucketRoutingTable(table, handshake.ModeId, p.ID)
@@ -177,7 +182,7 @@ func NewTable(h host.Host) (table *kbucket.RoutingTable, err error) {
 	// NewRoutingTable 使用给定的桶大小、本地 ID 和延迟容限创建一个新的路由表。
 	routingTable, err := kbucket.NewRoutingTable(50, kbucket.ConvertPeerID(h.ID()), time.Hour, m, NoOpThreshold, nil)
 	if err != nil {
-		logrus.Errorf("自定义路由表失败: %v", err)
+		logrus.Errorf("[%s]自定义路由表失败: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -190,9 +195,9 @@ func renewKbucketRoutingTable(routingTable *kbucket.RoutingTable, mode int, pi p
 	b, err := routingTable.TryAddPeer(pi, mode, true, false)
 	if err != nil {
 		if err.Error() == "peer rejected; insufficient capacity" {
-			logrus.Errorf("节点能力不足被拒绝")
+			logrus.Errorf("[%s]节点能力不足被拒绝: %v", utils.WhereAmI(), err)
 		} else {
-			logrus.Errorf("节点 %s 添加至K桶失败: %v", pi, err)
+			logrus.Errorf("[%s]节点 %s 添加至K桶失败: %v", utils.WhereAmI(), pi.String(), err)
 		}
 	}
 
@@ -230,6 +235,7 @@ func handshakeAgreement(ctx context.Context, h host.Host, nodeInfo *NodeInfo, pi
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 	if err := enc.Encode(handshake); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -246,11 +252,13 @@ func handshakeAgreement(ctx context.Context, h host.Host, nodeInfo *NodeInfo, pi
 	// 序列化请求
 	reqByte, err := request.Marshal()
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
 	stream, err := h.NewStream(ctx, pid, protocol.ID(ptl))
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 	defer stream.Close()
@@ -258,12 +266,14 @@ func handshakeAgreement(ctx context.Context, h host.Host, nodeInfo *NodeInfo, pi
 
 	// 将消息写入流
 	if err = streams.WriteStream(reqByte, stream); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
 	// 从流中读取消息
 	responseByte, err := streams.ReadStream(stream)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -272,6 +282,7 @@ func handshakeAgreement(ctx context.Context, h host.Host, nodeInfo *NodeInfo, pi
 	// 反序列化响应
 	err = response.Unmarshal(responseByte)
 	if err != nil || response.Code != 200 {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
@@ -280,6 +291,7 @@ func handshakeAgreement(ctx context.Context, h host.Host, nodeInfo *NodeInfo, pi
 	slicePayloadBuffer := bytes.NewBuffer(response.Data)
 	gobDecoder := gob.NewDecoder(slicePayloadBuffer)
 	if err := gobDecoder.Decode(handshake1); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 

@@ -139,8 +139,7 @@ func (cs *ConnSupervisor) startSupervising(readySignal chan struct{}) {
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				logrus.Error(err) // 如果出现错误，记录错误
-
+				logrus.Errorf("[%s]: %v", utils.WhereAmI(), err) // 如果出现错误，记录错误
 			}
 		}()
 		cs.startUp = true
@@ -181,6 +180,8 @@ func (cs *ConnSupervisor) try() {
 
 				handshake, err := handshakeAgreement(cs.ctx, cs.host, cs.nodeInfo, p.ID, HandshakeProtocol, int(cs.peerDHT.Mode()))
 				if err != nil {
+					logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+
 					// 如果错误继续下一个同行
 					// TODO:后面补充节点信息
 					cs.AddConn(p, false, -1, nil) // 将新的连接添加到连接管理器中
@@ -198,7 +199,7 @@ func (cs *ConnSupervisor) try() {
 					// 键不存在
 					table, err := NewTable(cs.host)
 					if err != nil {
-						logrus.Error("新建k桶失败", err)
+						logrus.Errorf("[%s]新建k桶失败: %v", utils.WhereAmI(), err)
 					}
 					// 更新Kbucket路由表
 					renewKbucketRoutingTable(table, handshake.ModeId, p.ID)
