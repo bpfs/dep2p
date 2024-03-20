@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/bpfs/dep2p/utils"
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-msgio"
@@ -27,6 +28,7 @@ func ReadStream(stream network.Stream) ([]byte, error) {
 
 	_, err := io.ReadFull(stream, header[:])
 	if err != nil || !bytes.Equal(header[:], messageHeader) {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		logrus.Error("ReadStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "read header err", err)
 		return nil, err
 	}
@@ -34,6 +36,7 @@ func ReadStream(stream network.Stream) ([]byte, error) {
 	reader := msgio.NewReaderSize(stream, MaxBlockSize)
 	msg, err := reader.ReadMsg()
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		logrus.Error("ReadStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "read msg err", err)
 		return nil, err
 	}
@@ -47,6 +50,7 @@ func ReadStream(stream network.Stream) ([]byte, error) {
 func WriteStream(msg []byte, stream network.Stream) error {
 	_, err := stream.Write(messageHeader)
 	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		logrus.Error("WriteStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "write header err", err)
 		return err
 	}
@@ -58,6 +62,7 @@ func WriteStream(msg []byte, stream network.Stream) error {
 
 	// WriteMsg 将消息写入传入的缓冲区。
 	if err = writer.WriteMsg(msg); err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		logrus.Error("WriteStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "write msg err", err)
 		return err
 	}
@@ -78,6 +83,7 @@ func CloseStream(stream network.Stream) {
 		// AwaitEOF 等待给定流上的 EOF，如果失败则返回错误。 它最多等待 EOFTimeout（默认为 1 分钟），然后重置流。
 		err := AwaitEOF(stream)
 		if err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			// 只是记录它，因为这无关紧要
 			logrus.Debug("CloseStream", "err", err, "protocol ID", stream.Protocol())
 		}
@@ -94,6 +100,7 @@ func HandlerWithClose(f network.StreamHandler) network.StreamHandler {
 			// 在这种情况下，或者当 goroutine 没有 panic 时，或者如果提供给 panic 的参数是 nil，recover 返回 nil。
 			// 因此 recover 的返回值报告了 goroutine 是否 panicing。
 			if r := recover(); r != nil {
+				logrus.Errorf("[%s]", utils.WhereAmI())
 				logrus.Error("handle stream", "panic error", r)
 				fmt.Println(string(panicTrace(4)))
 				// 关闭流的两端。 用它来告诉远端挂断电话并离开。
@@ -111,17 +118,20 @@ func HandlerWithWrite(f func(request *RequestMessage) error) network.StreamHandl
 	return func(stream network.Stream) {
 		var req RequestMessage
 		if err := f(&req); err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			return
 		}
 
 		// 序列化请求
 		requestByte, err := req.Marshal()
 		if err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			return
 		}
 
 		// WriteStream 将消息写入流。
 		if err := WriteStream(requestByte, stream); err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			return
 		}
 	}
@@ -136,9 +146,11 @@ func HandlerWithRead(f func(request *RequestMessage)) network.StreamHandler {
 		// ReadStream 从流中读取消息。
 		requestByte, err := ReadStream(stream)
 		if err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			return
 		}
 		if err := req.Unmarshal(requestByte); err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			return
 		}
 		// // 反序列化请求
@@ -204,6 +216,7 @@ func HandlerWithRW(f func(request *RequestMessage, response *ResponseMessage) (i
 		// 从流中读取请求消息
 		requestByte, err := ReadStream(stream)
 		if err != nil || len(requestByte) == 0 {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			logrus.Errorf("读取请求失败: %v", err)
 			SendErrorResponse(stream, 500, "读取请求失败")
 			return
@@ -211,6 +224,7 @@ func HandlerWithRW(f func(request *RequestMessage, response *ResponseMessage) (i
 
 		// 解析请求消息
 		if err := req.Unmarshal(requestByte); err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			logrus.Errorf("请求解析错误: %v", err)
 			SendErrorResponse(stream, 400, "请求解析错误")
 			return
@@ -226,12 +240,14 @@ func HandlerWithRW(f func(request *RequestMessage, response *ResponseMessage) (i
 		// 将处理后的响应消息编码并写入流中
 		responseByte, err := res.Marshal()
 		if err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			logrus.Errorf("响应编码失败: %v", err)
 			SendErrorResponse(stream, 500, "响应编码失败")
 			return
 		}
 
 		if err := WriteStream(responseByte, stream); err != nil {
+			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			logrus.Errorf("写入响应消息失败: %v", err)
 			// 这里不再返回，因为已经是发送响应的步骤
 		}
