@@ -33,7 +33,7 @@ type OptionDeP2P func(*DeP2P) error
 type DeP2P struct {
 	ctx            context.Context // ctx 是 dep2p 实例的上下文，用于在整个实例中传递取消信号和其他元数据。
 	host           host.Host       // libp2p的主机对象。
-	peerDHT        *DeP2PDHT        // 分布式哈希表。
+	peerDHT        *DeP2PDHT       // 分布式哈希表。
 	startUp        bool            // 是否启动标志。
 	options        Options         // 存储libp2p 选项
 	nodeInfo       *NodeInfo       // 节点信息
@@ -114,10 +114,66 @@ func NewDeP2P(ctx context.Context, opts ...OptionDeP2P) (*DeP2P, error) {
 }
 
 // 接收方处理握手请求
-func (bp *DeP2P) handshakeHandle(req *streams.RequestMessage, res *streams.ResponseMessage) error {
-	res.Code = 200 // 响应代码
-	res.Msg = "成功" // 响应消息
+// func (bp *DeP2P) handshakeHandle(req *streams.RequestMessage, res *streams.ResponseMessage) error {
+// 	res.Code = 200 // 响应代码
+// 	res.Msg = "成功" // 响应消息
 
+// 	handshakeres := &Handshake{
+// 		ModeId:   int(bp.DHT().Mode()),
+// 		NodeInfo: bp.nodeInfo,
+// 	}
+// 	var buf bytes.Buffer
+// 	enc := gob.NewEncoder(&buf)
+// 	if err := enc.Encode(handshakeres); err != nil {
+// 		return err
+// 	}
+
+// 	// Mode 允许自省 DHT 的操作模式
+// 	res.Data = buf.Bytes()
+
+// 	res.Message.Sender = bp.Host().ID().String() // 发送方ID
+
+// 	handshake := new(Handshake)
+
+// 	slicePayloadBuffer := bytes.NewBuffer(req.Payload)
+// 	gobDecoder := gob.NewDecoder(slicePayloadBuffer)
+// 	if err := gobDecoder.Decode(handshake); err != nil {
+// 		return err
+// 	}
+
+// 	table, exists := bp.connSupervisor.routingTables[handshake.ModeId]
+// 	pidDecode, err := peer.Decode(req.Message.Sender)
+// 	if err != nil {
+// 		return err
+
+// 	}
+
+// 	if exists {
+
+// 		// 键存在，可以使用 value
+// 		// 更新Kbucket路由表
+// 		renewKbucketRoutingTable(table, handshake.ModeId, pidDecode)
+
+// 	} else {
+// 		// 键不存在
+// 		table, err := NewTable(bp.connSupervisor.host)
+// 		if err != nil {
+// 			logrus.Error("新建k桶失败", err)
+// 		}
+// 		// 更新Kbucket路由表
+// 		renewKbucketRoutingTable(table, handshake.ModeId, pidDecode)
+// 		//
+// 		bp.connSupervisor.routingTables[handshake.ModeId] = table
+
+// 	}
+
+//		return nil
+//	}
+func (bp *DeP2P) handshakeHandle(req *streams.RequestMessage, res *streams.ResponseMessage) (int32, string) {
+	res.Code = 200 // 假设默认响应码为成功
+	res.Msg = "成功" // 默认响应消息为"成功"
+
+	// 构建握手响应
 	handshakeres := &Handshake{
 		ModeId:   int(bp.DHT().Mode()),
 		NodeInfo: bp.nodeInfo,
@@ -125,49 +181,46 @@ func (bp *DeP2P) handshakeHandle(req *streams.RequestMessage, res *streams.Respo
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 	if err := enc.Encode(handshakeres); err != nil {
-		return err
+		// 编码失败，返回错误响应码和消息
+		return 500, "握手响应编码失败"
 	}
 
-	// Mode 允许自省 DHT 的操作模式
+	// 设置响应数据
 	res.Data = buf.Bytes()
-
-	res.Message.Sender = bp.Host().ID().String() // 发送方ID
+	res.Message.Sender = bp.Host().ID().String() // 设置发送方ID
 
 	handshake := new(Handshake)
-
 	slicePayloadBuffer := bytes.NewBuffer(req.Payload)
 	gobDecoder := gob.NewDecoder(slicePayloadBuffer)
 	if err := gobDecoder.Decode(handshake); err != nil {
-		return err
+		// 请求解码失败
+		return 400, "握手请求解码失败"
 	}
 
+	// 处理握手逻辑
 	table, exists := bp.connSupervisor.routingTables[handshake.ModeId]
 	pidDecode, err := peer.Decode(req.Message.Sender)
 	if err != nil {
-		return err
-
+		// Peer ID解码失败
+		return 400, "Peer ID解码失败"
 	}
 
 	if exists {
-
-		// 键存在，可以使用 value
 		// 更新Kbucket路由表
 		renewKbucketRoutingTable(table, handshake.ModeId, pidDecode)
-
 	} else {
-		// 键不存在
+		// 新建Kbucket路由表
 		table, err := NewTable(bp.connSupervisor.host)
 		if err != nil {
-			logrus.Error("新建k桶失败", err)
+			// 新建路由表失败
+			return 500, "新建路由表失败"
 		}
-		// 更新Kbucket路由表
 		renewKbucketRoutingTable(table, handshake.ModeId, pidDecode)
-		//
 		bp.connSupervisor.routingTables[handshake.ModeId] = table
-
 	}
 
-	return nil
+	// 如果执行到这里，说明处理成功
+	return 200, "握手成功"
 }
 
 // newConnSupervisor 创建一个新的 ConnSupervisor 实例
