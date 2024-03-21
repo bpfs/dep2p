@@ -270,7 +270,7 @@ func (dht *DeP2PDHT) classicProvide(ctx context.Context, keyMH multihash.Multiha
 			// 使用协议传递器向对等节点发送提供者记录。
 			err := dht.protoMessenger.PutProvider(ctx, p, keyMH, dht.host)
 			if err != nil {
-				logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+				// logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 				// 如果发生错误，打印错误日志。
 				logrus.Debug(err)
 			}
@@ -354,7 +354,7 @@ func (dht *DeP2PDHT) findProvidersAsyncRoutine(ctx context.Context, key multihas
 
 			provs, closest, err := dht.protoMessenger.GetProviders(ctx, p, key)
 			if err != nil {
-				logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+				// logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 				return nil, err
 			}
 

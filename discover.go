@@ -132,7 +132,7 @@ func (cs *ConnSupervisor) handleChanNewPeerFound(peerChan <-chan peer.AddrInfo) 
 			handshake, err := handshakeAgreement(cs.ctx, cs.host, cs.nodeInfo, p.ID, HandshakeProtocol, int(cs.peerDHT.Mode()))
 
 			if err != nil {
-				logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+				// logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 
 				// 如果错误继续下一个同行
 				// TODO:后面补充节点信息
@@ -258,7 +258,7 @@ func handshakeAgreement(ctx context.Context, h host.Host, nodeInfo *NodeInfo, pi
 
 	stream, err := h.NewStream(ctx, pid, protocol.ID(ptl))
 	if err != nil {
-		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+		// logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 	defer stream.Close()

@@ -88,7 +88,7 @@ func (dht *DeP2PDHT) runLookupWithFollowup(ctx context.Context, target string, q
 	// 执行查询
 	lookupRes, qps, err := dht.runQuery(ctx, target, queryFn, stopFn)
 	if err != nil {
-		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+		// logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 

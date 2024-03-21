@@ -217,6 +217,9 @@ func (bp *DeP2P) handshakeHandle(req *streams.RequestMessage, res *streams.Respo
 		logrus.Errorf("[%s]:Host未初始化", utils.WhereAmI())
 		return 500, "Host未初始化"
 	}
+	if res.Message == nil {
+		res.Message = &streams.Message{}
+	}
 	res.Message.Sender = bp.Host().ID().String() // 设置发送方ID
 
 	handshake := new(Handshake)

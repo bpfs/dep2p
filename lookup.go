@@ -38,7 +38,7 @@ func (dht *DeP2PDHT) GetClosestPeers(ctx context.Context, key string) ([]peer.ID
 	lookupRes, err := dht.runLookupWithFollowup(ctx, key, dht.pmGetClosestPeers(key), func(*qpeerset.QueryPeerset) bool { return false })
 
 	if err != nil {
-		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+		// logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
 
