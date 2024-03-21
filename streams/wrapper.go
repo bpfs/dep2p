@@ -100,8 +100,7 @@ func HandlerWithClose(f network.StreamHandler) network.StreamHandler {
 			// 在这种情况下，或者当 goroutine 没有 panic 时，或者如果提供给 panic 的参数是 nil，recover 返回 nil。
 			// 因此 recover 的返回值报告了 goroutine 是否 panicing。
 			if r := recover(); r != nil {
-				logrus.Errorf("[%s]", utils.WhereAmI())
-				logrus.Error("handle stream", "panic error", r)
+				logrus.Errorf("[%s]处理流恐慌错误:%v", utils.WhereAmI(), r)
 				fmt.Println(string(panicTrace(4)))
 				// 关闭流的两端。 用它来告诉远端挂断电话并离开。
 				_ = stream.Reset()
