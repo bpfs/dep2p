@@ -130,7 +130,6 @@ func (cs *ConnSupervisor) handleChanNewPeerFound(peerChan <-chan peer.AddrInfo) 
 			cs.host.Peerstore().AddAddrs(p.ID, p.Addrs, peerstore.PermanentAddrTTL)
 
 			handshake, err := handshakeAgreement(cs.ctx, cs.host, cs.nodeInfo, p.ID, HandshakeProtocol, int(cs.peerDHT.Mode()))
-
 			if err != nil {
 				// logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 
@@ -281,9 +280,14 @@ func handshakeAgreement(ctx context.Context, h host.Host, nodeInfo *NodeInfo, pi
 
 	// 反序列化响应
 	err = response.Unmarshal(responseByte)
-	if err != nil || response.Code != 200 {
+	if err != nil {
 		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 		return nil, err
+	}
+
+	if response.Code != 200 {
+		logrus.Errorf("[%s]握手失败，返回: %d %s", utils.WhereAmI(), response.Code, response.Msg)
+		return nil, fmt.Errorf("握手失败")
 	}
 
 	handshake1 := new(Handshake)
