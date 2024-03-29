@@ -146,14 +146,14 @@ func CloseStream(stream network.Stream) error {
 
 		select {
 		case <-timer.C:
-			logrus.Errorf("[%s]: 等待EOF超时", utils.WhereAmI())
+			// logrus.Errorf("[%s]: 等待EOF超时", utils.WhereAmI())
 			// 超时后重置流，确保资源被释放
 			if err := stream.Reset(); err != nil {
 				logrus.Errorf("[%s]: 重置流失败: %v", utils.WhereAmI(), err)
 			}
 		case err := <-done:
 			if err != nil {
-				logrus.Errorf("[%s]: 等待EOF时出错: %v", utils.WhereAmI(), err)
+				// logrus.Errorf("[%s]: 等待EOF时出错: %v", utils.WhereAmI(), err)
 				// 有错误时记录，但通常不需要额外操作
 			}
 		}
