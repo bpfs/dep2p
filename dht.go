@@ -745,7 +745,7 @@ func (dht *DeP2PDHT) lookupCheck(ctx context.Context, p peer.ID) error {
 	peerids, err := dht.protoMessenger.GetClosestPeers(ctx, p, p, valByte)
 	// p 应该至少返回它自己的peerid
 	if err == nil && len(peerids) == 0 {
-		logrus.Errorf("[%s]对等点 %s 未能返回其最接近的对等点，得到 %d: %v", utils.WhereAmI(), p, len(peerids), err)
+		// logrus.Errorf("[%s]对等点 %s 未能返回其最接近的对等点，得到 %d: %v", utils.WhereAmI(), p, len(peerids), err)
 	}
 	return err
 }
