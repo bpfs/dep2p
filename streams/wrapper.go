@@ -1,9 +1,10 @@
 package streams
 
 import (
-	"bytes"
-	"fmt"
 	"io"
+	"net"
+	"runtime/debug"
+	"time"
 
 	"github.com/bpfs/dep2p/utils"
 	pool "github.com/libp2p/go-buffer-pool"
@@ -15,102 +16,269 @@ import (
 // 表示消息头的长度
 const (
 	messageHeaderLen = 17
-	MaxBlockSize     = 20000000 // 20M
+	// MaxBlockSize     = 20000000 // 20M
+
 )
 
 var (
 	messageHeader = headerSafe([]byte("/protobuf/msgio"))
+	// 最大重试次数
+	maxRetries = 3
+	// 基础超时时间
+	baseTimeout = 5 * time.Second
+	// 最大消息大小
+	MaxBlockSize = 1 << 25 // 32MB
 )
 
-// ReadStream 从流中读取消息
+// ReadStream 从流中读取消息，带指数退避重试
+// 特别是考虑到避免资源的过度消耗和处理网络故障情况，引入指数退避重试策略，并设置合理的重试次数上限。
+// 重要的改进点：
+// 指数退避：每次重试的超时时间都会增加，减少在网络不稳定时的重试频率，减轻服务器压力。
+// 有限的重试次数：通过maxRetries限制重试次数，防止在遇到持续的网络问题时无限重试。
+// 清晰的错误处理：根据错误类型决定是否重试。例如，只有在遇到网络超时或其他指定的网络错误时才进行重试。
 func ReadStream(stream network.Stream) ([]byte, error) {
-	var header [messageHeaderLen]byte
+	var (
+		header [messageHeaderLen]byte
+		err    error
+	)
 
-	_, err := io.ReadFull(stream, header[:])
-	if err != nil || !bytes.Equal(header[:], messageHeader) {
-		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
-		logrus.Error("ReadStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "read header err", err)
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// 使用指数退避设置读取操作的超时时间
+		timeout := baseTimeout * time.Duration(1<<attempt)
+		stream.SetReadDeadline(time.Now().Add(timeout))
+
+		// 尝试读取消息头部
+		if _, err = io.ReadFull(stream, header[:]); err != nil {
+			// 如果错误是网络超时或暂时性的，考虑重试
+			if netErr, ok := err.(net.Error); ok && (netErr.Timeout() || netErr.Temporary()) {
+				logrus.Errorf("[%s]: 尝试%d次读取头部失败，网络错误: %v", utils.WhereAmI(), attempt+1, err)
+				continue
+			}
+			// 对于非网络超时、非暂时性错误，直接退出
+			break
+		}
+
+		// 如果头部读取成功，退出重试循环
+		break
+	}
+
+	if err != nil {
+		logrus.Errorf("[%s]: 经过%d次重试后读取失败: %v", utils.WhereAmI(), maxRetries, err)
 		return nil, err
 	}
 
+	// 成功读取头部后，继续读取消息体，此时重置超时以避免中断正常读取
+	stream.SetReadDeadline(time.Time{})
 	reader := msgio.NewReaderSize(stream, MaxBlockSize)
 	msg, err := reader.ReadMsg()
 	if err != nil {
-		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
-		logrus.Error("ReadStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "read msg err", err)
+		logrus.Errorf("[%s]: 读取消息体失败: %v", utils.WhereAmI(), err)
 		return nil, err
 	}
-
 	defer reader.ReleaseMsg(msg)
 
 	return msg, nil
 }
 
 // WriteStream 将消息写入流
+// 采用类似于ReadStream的优化策略来增强其鲁棒性，尤其是在面对网络问题时。
+// 重点将包括设置写操作的超时时间和对潜在的写操作失败进行适当的错误处理。
+// 考虑到WriteStream的操作通常比读操作更简单（通常是一次性写入而非多次读取），通过设置整体的写超时来简化流程。
 func WriteStream(msg []byte, stream network.Stream) error {
-	_, err := stream.Write(messageHeader)
-	if err != nil {
-		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
-		logrus.Error("WriteStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "write header err", err)
+	// 设置写操作的超时时间
+	if err := stream.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		logrus.Errorf("[%s]: 设置写入超时失败: %v", utils.WhereAmI(), err)
 		return err
 	}
 
-	// NewWriter 包装了一个 io.Writer 和一个 msgio 框架的作者。 msgio.Writer 将写入每条消息的长度前缀。
-	// writer := msgio.NewWriter(stream)
-	// NewWriterWithPool 与 NewWriter 相同，但允许用户传递自定义缓冲池。
-	writer := msgio.NewWriterWithPool(stream, pool.GlobalPool)
-
-	// WriteMsg 将消息写入传入的缓冲区。
-	if err = writer.WriteMsg(msg); err != nil {
-		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
-		logrus.Error("WriteStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "write msg err", err)
+	// 先写入消息头
+	_, err := stream.Write(messageHeader)
+	if err != nil {
+		logrus.Errorf("[%s]: 写入头部失败: %v", utils.WhereAmI(), err)
 		return err
+	}
+
+	// 使用msgio包装流，以便于写入长度前缀和消息体
+	writer := msgio.NewWriterWithPool(stream, pool.GlobalPool)
+	if err = writer.WriteMsg(msg); err != nil {
+		logrus.Errorf("[%s]: 写入消息失败: %v", utils.WhereAmI(), err)
+		return err
+	}
+
+	// 写入操作成功后，清除写超时设置
+	if err := stream.SetWriteDeadline(time.Time{}); err != nil {
+		logrus.Errorf("[%s]: 清除写入超时设置失败: %v", utils.WhereAmI(), err)
+		// 此处不返回错误，因为主要写入操作已经成功完成
 	}
 
 	return nil
 }
 
-// CloseStream 写入后关闭流，并等待 EOF。
-func CloseStream(stream network.Stream) {
+// CloseStream 写入后关闭流，并等待EOF。
+func CloseStream(stream network.Stream) error {
 	if stream == nil {
-		return
+		return nil
 	}
 
-	// _ = stream.CloseWrite()
-	// _ = stream.CloseRead()
+	// 关闭写方向。如果流是全双工的，这会发送EOF给读方，而不会关闭整个流。
+	if err := stream.CloseWrite(); err != nil {
+		logrus.Errorf("[%s]: 关闭写方向失败: %v", utils.WhereAmI(), err)
+		return err
+	}
+
+	// 关闭读方向。如果不需要读取EOF，也可以省略这一步。
+	if err := stream.CloseRead(); err != nil {
+		logrus.Errorf("[%s]: 关闭读方向失败: %v", utils.WhereAmI(), err)
+		return err
+	}
 
 	go func() {
-		// AwaitEOF 等待给定流上的 EOF，如果失败则返回错误。 它最多等待 EOFTimeout（默认为 1 分钟），然后重置流。
-		err := AwaitEOF(stream)
-		if err != nil {
-			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
-			// 只是记录它，因为这无关紧要
-			logrus.Debug("CloseStream", "err", err, "protocol ID", stream.Protocol())
+		// 设置超时，以防AwaitEOF卡住
+		timer := time.NewTimer(EOFTimeout)
+		defer timer.Stop()
+
+		done := make(chan error, 1)
+		go func() {
+			// AwaitEOF等待给定流上的EOF，如果失败则返回错误。
+			err := AwaitEOF(stream)
+			done <- err
+		}()
+
+		select {
+		case <-timer.C:
+			logrus.Errorf("[%s]: 等待EOF超时", utils.WhereAmI())
+			// 超时后重置流，确保资源被释放
+			if err := stream.Reset(); err != nil {
+				logrus.Errorf("[%s]: 重置流失败: %v", utils.WhereAmI(), err)
+			}
+		case err := <-done:
+			if err != nil {
+				logrus.Errorf("[%s]: 等待EOF时出错: %v", utils.WhereAmI(), err)
+				// 有错误时记录，但通常不需要额外操作
+			}
 		}
 	}()
+
+	return nil
 }
 
 // HandlerWithClose 用关闭流和从恐慌中恢复来包装处理程序
 func HandlerWithClose(f network.StreamHandler) network.StreamHandler {
 	return func(stream network.Stream) {
 		defer func() {
-			// recover 内置函数允许程序管理恐慌 goroutine 的行为。
-			// 在延迟函数（但不是它调用的任何函数）内执行恢复调用，通过恢复正常执行来停止恐慌序列，并检索传递给恐慌调用的错误值。
-			// 如果在延迟函数之外调用 recover，它不会停止恐慌序列。
-			// 在这种情况下，或者当 goroutine 没有 panic 时，或者如果提供给 panic 的参数是 nil，recover 返回 nil。
-			// 因此 recover 的返回值报告了 goroutine 是否 panicing。
+			// 从panic中恢复并记录错误信息
 			if r := recover(); r != nil {
-				logrus.Errorf("[%s]处理流恐慌错误:%v", utils.WhereAmI(), r)
-				fmt.Println(string(panicTrace(4)))
-				// 关闭流的两端。 用它来告诉远端挂断电话并离开。
-				_ = stream.Reset()
+				logrus.Errorf("[%s]处理流恐慌错误: %v", utils.WhereAmI(), r)
+				// 打印堆栈信息以便调试
+				logrus.Errorf("Panic stack trace: %s", string(debug.Stack()))
+				// 尝试重置stream以确保资源被释放
+				if err := stream.Reset(); err != nil {
+					logrus.Errorf("[%s]: 尝试重置stream失败: %v", utils.WhereAmI(), err)
+				}
 			}
 		}()
+
+		// 调用原始的stream处理函数
 		f(stream)
-		// 写入后关闭流，并等待 EOF。
-		CloseStream(stream)
+
+		// 尝试优雅地关闭stream
+		if err := CloseStream(stream); err != nil {
+			logrus.Errorf("[%s]: 关闭stream时发生错误: %v", utils.WhereAmI(), err)
+		}
 	}
 }
+
+// ReadStream 从流中读取消息
+// func ReadStream(stream network.Stream) ([]byte, error) {
+// 	var header [messageHeaderLen]byte
+
+// 	_, err := io.ReadFull(stream, header[:])
+// 	if err != nil || !bytes.Equal(header[:], messageHeader) {
+// 		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+// 		logrus.Error("ReadStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "read header err", err)
+// 		return nil, err
+// 	}
+
+// 	reader := msgio.NewReaderSize(stream, MaxBlockSize)
+// 	msg, err := reader.ReadMsg()
+// 	if err != nil {
+// 		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+// 		logrus.Error("ReadStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "read msg err", err)
+// 		return nil, err
+// 	}
+
+// 	defer reader.ReleaseMsg(msg)
+
+// 	return msg, nil
+// }
+
+// WriteStream 将消息写入流
+// func WriteStream(msg []byte, stream network.Stream) error {
+// 	_, err := stream.Write(messageHeader)
+// 	if err != nil {
+// 		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+// 		logrus.Error("WriteStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "write header err", err)
+// 		return err
+// 	}
+
+// 	// NewWriter 包装了一个 io.Writer 和一个 msgio 框架的作者。 msgio.Writer 将写入每条消息的长度前缀。
+// 	// writer := msgio.NewWriter(stream)
+// 	// NewWriterWithPool 与 NewWriter 相同，但允许用户传递自定义缓冲池。
+// 	writer := msgio.NewWriterWithPool(stream, pool.GlobalPool)
+
+// 	// WriteMsg 将消息写入传入的缓冲区。
+// 	if err = writer.WriteMsg(msg); err != nil {
+// 		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+// 		logrus.Error("WriteStream", "pid", stream.Conn().RemotePeer().String(), "protocolID", stream.Protocol(), "write msg err", err)
+// 		return err
+// 	}
+
+// 	return nil
+// }
+
+// CloseStream 写入后关闭流，并等待 EOF。
+// func CloseStream(stream network.Stream) {
+// 	if stream == nil {
+// 		return
+// 	}
+
+// 	// _ = stream.CloseWrite()
+// 	// _ = stream.CloseRead()
+
+// 	go func() {
+// 		// AwaitEOF 等待给定流上的 EOF，如果失败则返回错误。 它最多等待 EOFTimeout（默认为 1 分钟），然后重置流。
+// 		err := AwaitEOF(stream)
+// 		if err != nil {
+// 			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+// 			// 只是记录它，因为这无关紧要
+// 			logrus.Debug("CloseStream", "err", err, "protocol ID", stream.Protocol())
+// 		}
+// 	}()
+// }
+
+// HandlerWithClose 用关闭流和从恐慌中恢复来包装处理程序
+//
+//	func HandlerWithClose(f network.StreamHandler) network.StreamHandler {
+//		return func(stream network.Stream) {
+//			defer func() {
+//				// recover 内置函数允许程序管理恐慌 goroutine 的行为。
+//				// 在延迟函数（但不是它调用的任何函数）内执行恢复调用，通过恢复正常执行来停止恐慌序列，并检索传递给恐慌调用的错误值。
+//				// 如果在延迟函数之外调用 recover，它不会停止恐慌序列。
+//				// 在这种情况下，或者当 goroutine 没有 panic 时，或者如果提供给 panic 的参数是 nil，recover 返回 nil。
+//				// 因此 recover 的返回值报告了 goroutine 是否 panicing。
+//				if r := recover(); r != nil {
+//					logrus.Errorf("[%s]处理流恐慌错误:%v", utils.WhereAmI(), r)
+//					fmt.Println(string(panicTrace(4)))
+//					// 关闭流的两端。 用它来告诉远端挂断电话并离开。
+//					_ = stream.Reset()
+//				}
+//			}()
+//			f(stream)
+//			// 写入后关闭流，并等待 EOF。
+//			CloseStream(stream)
+//		}
+//	}
+//
 
 // HandlerWithWrite 通过写入、关闭流和从恐慌中恢复来包装处理程序
 func HandlerWithWrite(f func(request *RequestMessage) error) network.StreamHandler {
@@ -152,11 +320,6 @@ func HandlerWithRead(f func(request *RequestMessage)) network.StreamHandler {
 			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
 			return
 		}
-		// // 反序列化请求
-		// req, err := utils.DeserializeRequest(requestByte)
-		// if err != nil {
-		// 	return
-		// }
 
 		f(&req)
 	}
