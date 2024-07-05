@@ -25,7 +25,7 @@ var (
 	// 最大重试次数
 	maxRetries = 3
 	// 基础超时时间
-	baseTimeout = 5 * time.Second
+	baseTimeout = 33 * time.Second
 	// 最大消息大小
 	MaxBlockSize = 1 << 25 // 32MB
 )
