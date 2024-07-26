@@ -31,6 +31,7 @@ type Options struct {
 type OptionDeP2P func(*DeP2P) error
 
 type DeP2P struct {
+		mu             sync.RWMutex
 	ctx            context.Context // ctx 是 dep2p 实例的上下文，用于在整个实例中传递取消信号和其他元数据。
 	host           host.Host       // libp2p的主机对象。
 	peerDHT        *DeP2PDHT       // 分布式哈希表。
@@ -295,22 +296,34 @@ func (bp *DeP2P) RoutingTables() map[int]*kbucket.RoutingTable {
 	return bp.connSupervisor.routingTables
 }
 
-// RoutingTable 根据dht类型获取指定类型RoutingTable
+// RoutingTable 根据 dht 类型获取指定类型 RoutingTable
 func (bp *DeP2P) RoutingTable(mode int) *kbucket.RoutingTable {
+	bp.mu.RLock()
+	routingTable, exists := bp.connSupervisor.routingTables[mode]
+	bp.mu.RUnlock()
 
-	routingTable, exists := bp.connSupervisor.routingTables[mode] // 获取键对应的值
 	if exists {
 		// 键存在，可以使用 value
 		return routingTable
-	} else {
-		// 键不存在
-		table, err := NewTable(bp.host)
-		if err != nil {
-			logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
-		}
-		bp.connSupervisor.routingTables[mode] = table
-		return table
 	}
+
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+
+	// 仔细检查它是否在此期间创建
+	routingTable, exists = bp.connSupervisor.routingTables[mode]
+	if exists {
+		return routingTable
+	}
+
+	// 键不存在
+	table, err := NewTable(bp.host)
+	if err != nil {
+		logrus.Errorf("[%s]: %v", utils.WhereAmI(), err)
+		return nil
+	}
+	bp.connSupervisor.routingTables[mode] = table
+	return table
 }
 
 // NodeInfo 返回 节点信息
