@@ -31,7 +31,7 @@ type Options struct {
 type OptionDeP2P func(*DeP2P) error
 
 type DeP2P struct {
-		mu             sync.RWMutex
+	mu             sync.RWMutex
 	ctx            context.Context // ctx 是 dep2p 实例的上下文，用于在整个实例中传递取消信号和其他元数据。
 	host           host.Host       // libp2p的主机对象。
 	peerDHT        *DeP2PDHT       // 分布式哈希表。
