@@ -6,7 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
-
+	"sync"
+	
 	"github.com/bpfs/dep2p/kbucket"
 	"github.com/bpfs/dep2p/streams"
 	"github.com/bpfs/dep2p/utils"
