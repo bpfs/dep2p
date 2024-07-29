@@ -236,8 +236,8 @@ func GetNetworkInfo() (*NetworkInfo, error) {
 		s.DownloadTest()
 		s.UploadTest()
 
-		upstreamBandwidth = s.ULSpeed
-		downstreamBandwidth = s.DLSpeed
+		// upstreamBandwidth = s.ULSpeed
+		// downstreamBandwidth = s.DLSpeed
 	}
 
 	networkInfo := &NetworkInfo{
